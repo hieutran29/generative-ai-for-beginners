@@ -1,36 +1,84 @@
-# here are some suggestions to improve the code:
+# This Flask application is improved by ChatGPT o4-mini-high
 
-# - Add input validation to prevent malicious input from being processed by the server. You can use a library like flask-wtf to validate user input and sanitize it before processing.
+# 1 - Externalize Configuration & Use a Production-Ready Server
+# • Pull settings (host, port, debug mode) from environment variables
+# • Swap out the built-in dev server for something like Gunicorn in production
 
-# - Use environment variables to store sensitive information such as database credentials, API keys, and other secrets. This will prevent the information from being hard-coded in the code and exposed in case of a security breach.
+# 2 - Add Input Validation & Sanitization
+# • Guard against empty or malicious input
+# • Return a clear error if validation fails
 
-# - Implement error handling to provide meaningful error messages to the user in case of errors. You can use the @app.errorhandler() decorator to handle exceptions and return an error response.
+# 3 - Introduce Structured Logging & Error Handling
+# • Log every request with status code, path, and user input
+# • Return JSON-formatted errors for better client-side handling
 
-from flask import Flask, request
-from flask_wtf import FlaskForm
-from wtforms import StringField, SubmitField
-from wtforms.validators import DataRequired, Length, Email
+import os
+import re
+import logging
+from flask import Flask, request, abort, jsonify
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'secret_key'
+# Configure structured logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
 
-class HelloForm(FlaskForm):
-    name = StringField('Name', validators=[DataRequired(), Length(min=3)])
-    email = StringField('Email', validators=[DataRequired(), Email()])
-    submit = SubmitField('Submit')
+def create_app():
+    app = Flask(__name__)
 
-@app.route('/', methods=['GET', 'POST'])
-def hello():
-    form = HelloForm()
-    if form.validate_on_submit():
-        name = form.name.data
-        email = form.email.data
-        return f'Hello, {name} ({email})!'
-    return form.render_template()
+    # Load configuration from environment variables
+    app.config.update(
+        HOST=os.getenv("FLASK_HOST", "0.0.0.0"),
+        PORT=int(os.getenv("FLASK_PORT", 5000)),
+        DEBUG=os.getenv("FLASK_DEBUG", "false").lower() == "true",
+    )
 
-@app.errorhandler(400)
-def bad_request(error):
-    return 'Bad request', 400
+    @app.before_request
+    def log_request():
+        logging.info(
+            "Request: %s %s?%s",
+            request.method,
+            request.path,
+            request.query_string.decode(),
+        )
 
-if __name__ == '__main__':
-    app.run()
+    @app.errorhandler(400)
+    @app.errorhandler(404)
+    @app.errorhandler(500)
+    def handle_error(err):
+        response = jsonify({
+            "error": err.name,
+            "message": err.description if hasattr(err, "description") else str(err),
+        })
+        response.status_code = err.code if hasattr(err, "code") else 500
+        logging.error(
+            "Error %s on %s: %s",
+            response.status_code,
+            request.path,
+            response.json,
+        )
+        return response
+
+    @app.route("/")
+    def hello():
+        # Input validation and sanitization
+        name = request.args.get("name", "").strip()
+        if not name:
+            abort(400, description="Query parameter 'name' is required and cannot be empty.")
+        if not re.fullmatch(r"[A-Za-z ]{1,50}", name):
+            abort(400, description="Invalid characters in 'name'. Letters and spaces only.")
+
+        return f"Hello, {name}!"
+
+    return app
+
+if __name__ == "__main__":
+    app = create_app()
+    # Development: use built-in server
+    app.run(
+        host=app.config['HOST'],
+        port=app.config['PORT'],
+        debug=app.config['DEBUG'],
+    )
+    # Production: run with Gunicorn
+    # e.g., gunicorn "app:create_app()"
