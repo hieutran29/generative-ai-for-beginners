@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 # load environment variables from .env file
 load_dotenv()
 
-# configure Azure OpenAI service client 
+# configure OpenAI service client 
 client = OpenAI()
 deployment="gpt-3.5-turbo"
 
